@@ -6,6 +6,7 @@ from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 import torch.nn.functional as F
 from einops import rearrange, repeat
 import math
+from models.modules.AFAE import AFAE, FrequencyAwareLoss
 
 
 
@@ -818,6 +819,11 @@ class MSFormer(nn.Module):
                                                 drop_path=dec_dpr[sum(depths[4:6]):sum(depths[4:7])],
                                                 token_projection=token_projection, token_mlp=token_mlp,
                                                 shift_flag=shift_flag)
+        # AFAE: Adaptive Frequency-Aware Enhancement blocks
+        self.afae_fea_up0 = AFAE(int(dim * 2 ** 2))
+        self.afae_fea_up1 = AFAE(int(dim * 2 ** 2))
+        self.afae_fea_up2 = AFAE(int(dim * 2 ** 2))
+        self.afae_cat_f   = AFAE(int(dim * 2))
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -863,7 +869,7 @@ class MSFormer(nn.Module):
 
 
         fea_up0 = self.reduce_chan_level0(latent)
-        result['fea_up0'] = fea_up0
+        result['fea_up0'] = self.afae_fea_up0(fea_up0, zc)
 
         inp_dec_level3 = self.up4_3(latent)
         zero_map_up3 = self.up4_3(zero_map_down3)
@@ -875,7 +881,7 @@ class MSFormer(nn.Module):
 
         out_dec_level3 = out_dec_level3 + up1
 
-        result['fea_up1'] = out_dec_level3
+        result['fea_up1'] = self.afae_fea_up1(out_dec_level3, zc)
 
         inp_dec_level2 = self.up3_2(out_dec_level3)
         zero_map_up2 = self.up3_2(zero_map_up3)
@@ -887,7 +893,7 @@ class MSFormer(nn.Module):
         up2 = self.decoderlayer_2(inp_dec_level2, zero_map=zero_map_up2)
         out_dec_level2 = out_dec_level2 + up2
 
-        result['fea_up2'] = out_dec_level2
+        result['fea_up2'] = self.afae_fea_up2(out_dec_level2, zc)
 
         inp_dec_level1 = self.up2_1(out_dec_level2)
         zero_map_up1 = self.up2_1(zero_map_up2)
@@ -901,7 +907,7 @@ class MSFormer(nn.Module):
         out_dec_level0 = self.refinement(out_dec_level1)
         # out_dec_level0 = self.reduce_chan_level0(out_dec_level0)
 
-        result['cat_f'] = out_dec_level0
+        result['cat_f'] = self.afae_cat_f(out_dec_level0, zc)
 
 
         return result
